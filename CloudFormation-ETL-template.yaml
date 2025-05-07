@@ -1,0 +1,128 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for Reviews ETL Pipeline'
+
+Resources:
+  # S3 Bucket
+  ReviewsETLBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-reviews-etl-bucket'
+
+  # Lambda Functions (18 in total)
+  LambdaFunction1:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-lambda-function-1'
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          # Your Lambda function code here
+      Runtime: python3.8
+      Timeout: 300
+
+  # Repeat the above Lambda function resource 17 more times, changing the names and details as needed
+  # LambdaFunction2, LambdaFunction3, ..., LambdaFunction18
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  # Step Function
+  ReviewsETLStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      DefinitionString: !Sub |
+        {
+          "Comment": "Reviews ETL Pipeline State Machine",
+          "StartAt": "LambdaFunction1",
+          "States": {
+            "LambdaFunction1": {
+              "Type": "Task",
+              "Resource": "${LambdaFunction1.Arn}",
+              "Next": "LambdaFunction2"
+            },
+            "LambdaFunction2": {
+              "Type": "Task",
+              "Resource": "${LambdaFunction2.Arn}",
+              "Next": "LambdaFunction3"
+            }
+            # Continue defining the steps for all 18 Lambda functions
+          }
+        }
+      RoleArn: !GetAtt StepFunctionExecutionRole.Arn
+
+  # Step Function Execution Role
+  StepFunctionExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: StepFunctionLambdaInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'lambda:InvokeFunction'
+                Resource: '*'
+
+  # EventBridge Schedule
+  ReviewsETLSchedule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: 'Schedule for Reviews ETL Pipeline'
+      ScheduleExpression: 'rate(1 day)'
+      State: 'ENABLED'
+      Targets:
+        - Arn: !Ref ReviewsETLStateMachine
+          Id: 'TargetStepFunction'
+          RoleArn: !GetAtt EventBridgeExecutionRole.Arn
+
+  # EventBridge Execution Role
+  EventBridgeExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: EventBridgeStepFunctionStart
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'states:StartExecution'
+                Resource: !Ref ReviewsETLStateMachine
+
+Outputs:
+  S3BucketName:
+    Description: 'Name of the S3 bucket'
+    Value: !Ref ReviewsETLBucket
+  StateMachineArn:
+    Description: 'ARN of the Step Function state machine'
+    Value: !Ref ReviewsETLStateMachine
+  ScheduleRuleArn:
+    Description: 'ARN of the EventBridge schedule rule'
+    Value: !GetAtt ReviewsETLSchedule.Arn
+
